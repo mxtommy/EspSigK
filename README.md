@@ -14,3 +14,7 @@ This library helps you get started with Signal K. It handles the common tasks ne
 * ArduinoWebsockets
 
 
+## To do:
+* Receive deltas and pass message to callback function
+
+
