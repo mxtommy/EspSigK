@@ -1,0 +1,44 @@
+<!-- file I use for testing the small web-pp -->
+<html>
+<head>
+  <title>Deltas</title>
+  <meta charset="utf-8">
+  <script type="text/javascript">
+
+var WebSocket = WebSocket || MozWebSocket;
+var lastDelta = Date.now();
+
+function connect() {
+  //var serverUrl = "ws://" + window.location.hostname + ":81";
+  var serverUrl = "ws://" + "192.168.0.50" + ":81";
+  connection = new WebSocket(serverUrl);
+
+  connection.onopen = function(evt) {
+    console.log("Connected!");
+    document.getElementById("box").innerHTML = "Connected!";
+    document.getElementById("last").innerHTML = "Last: N/A";
+    //document.getElementById("text").disabled = false;
+    //document.getElementById("send").disabled = false;
+  };
+
+  connection.onmessage = function(evt) {
+    var msg = JSON.parse(evt.data);
+    document.getElementById("box").innerHTML = JSON.stringify(msg, null, 2);
+    document.getElementById("last").innerHTML = "Last: " + ((Date.now() - lastDelta)/1000).toFixed(2) + "ms";
+    lastDelta = Date.now();
+  };
+};
+
+  connect();
+  setInterval(function(){
+    document.getElementById("age").innerHTML = "Age: " + ((Date.now() - lastDelta)/1000).toFixed(1) + "ms";
+  }, 50);
+  </script>
+</head>
+<body>
+  <h3>Last Delta</h3>
+  <pre width="100%" height="50%" id="box"></pre>
+  <div id="last"></div>
+  <div id="age"></div>
+</body>
+</html>
