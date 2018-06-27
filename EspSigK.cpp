@@ -80,6 +80,8 @@ EspSigK::EspSigK(String hostname, String ssid, String ssidPass)
 
   signalKServerHost = "";
   signalKServerPort = 80;
+  signalKServerToken = "";
+
   printDeltaSerial = false;
   printDebugSerial = false;
 
@@ -99,6 +101,9 @@ void EspSigK::setServerHost(String newServer) {
 }
 void EspSigK::setServerPort(uint16_t newPort) {
   signalKServerPort = newPort;
+}
+void EspSigK::setServerToken(String token) {
+    signalKServerToken = token;
 }
 void EspSigK::setPrintDeltaSerial(bool v) {
   printDeltaSerial = v;
@@ -317,6 +322,7 @@ bool EspSigK::getMDNSService(String &host, uint16_t &port) {
 void EspSigK::connectWebSocketClient() {
   String host = "";
   uint16_t port = 80;
+  String url = "/signalk/v1/stream?subscribe=none";
 
   if (signalKServerHost.length() == 0) {
     getMDNSService(host, port);
@@ -332,8 +338,11 @@ void EspSigK::connectWebSocketClient() {
     if (printDebugSerial) Serial.println("SIGK: No server for websocket client");
     return;
   }
+  if (signalKServerToken != "") {
+    url = url + "&token=" + signalKServerToken;
+  }
 
-  webSocketClient.begin(host, port, "/signalk/v1/stream?subscribe=none");
+  webSocketClient.begin(host, port, url);
   wsClientConnected = true;
 }
 
@@ -434,8 +443,8 @@ void EspSigK::sendDelta() {
   JsonObject& thisUpdate = updatesArr.createNestedObject();
 
   JsonObject& source = thisUpdate.createNestedObject("source");
-  source["label"] = myHostname;
-  source["src"] = "local";
+  source["label"] = "ESP";
+  source["src"] = myHostname;
      
   JsonArray& values = thisUpdate.createNestedArray("values");
   for (uint8_t i = 0; i < idxDeltaValues; i++) {

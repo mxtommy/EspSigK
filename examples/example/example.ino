@@ -17,6 +17,10 @@ void setup() {
   sigK.setPrintDeltaSerial(true);       // default false, prints deltas to Serial.
   sigK.setServerHost("192.168.0.50");   // Optional. Sets the ip of the SignalKServer to connect to. If not set we try to discover server with mDNS
   //sigK.setServerPort(80);             // If manually setting host, this sets the port for the signalK Server (default 80);
+  
+  sigK.setServerToken("SUPERSECRETSTRING"); // if you have security enabled in node server, it wont accept deltas unles you auth
+                                        // add a user via the admin console, and then run the "signalk-generate-token" script
+                                        // included with signalk to generate the string. (or disable security)
 
   sigK.begin();                         // Start everything. Connect to wifi, setup services, etc...
 

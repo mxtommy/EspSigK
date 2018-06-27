@@ -26,6 +26,7 @@ class EspSigK
 
     String signalKServerHost;
     uint16_t signalKServerPort;
+    String signalKServerToken;
 
     String deltaPaths[MAX_DELTA_VALUES];
     String deltaValues[MAX_DELTA_VALUES];
@@ -41,6 +42,7 @@ class EspSigK
     EspSigK(String hostname, String ssid, String ssidPass);
     void setServerHost(String newServer);
     void setServerPort(uint16_t newPort);
+    void setServerToken(String token);
     void setPrintDeltaSerial(bool v);
     void setPrintDebugSerial(bool v);
 
