@@ -1,7 +1,6 @@
-
 #include "EspSigK.h"
 
-
+#define JSON_DESERIALIZE_DELTA_SIZE 384
 
 // Server variables
 ESP8266WebServer server(80);
@@ -257,13 +256,14 @@ void htmlHandleNotFound(){
 }
 
 void htmlSignalKEndpoints() {
-  IPAddress ip;  
-  DynamicJsonBuffer jsonBuffer;
+  IPAddress ip;
+  const int capacity = JSON_OBJECT_SIZE(JSON_DESERIALIZE_DELTA_SIZE);
+  StaticJsonDocument<capacity> jsonBuffer;
   char response[2048];
   String wsURL;
   ip = WiFi.localIP();
  
-  JsonObject& json = jsonBuffer.createObject();
+  JsonObject json = jsonBuffer.createNestedObject();
   String ipString = String(ip[0]);
   for (uint8_t octet = 1; octet < 4; ++octet) {
     ipString += '.' + String(ip[octet]);
@@ -272,13 +272,13 @@ void htmlSignalKEndpoints() {
 
   wsURL = "ws://" + ipString + ":81/";
 
-  JsonObject& endpoints = json.createNestedObject("endpoints");
-  JsonObject& v1 = endpoints.createNestedObject("v1");
+  JsonObject endpoints = json.createNestedObject("endpoints");
+  JsonObject v1 = endpoints.createNestedObject("v1");
   v1["version"] = "1.alpha1";
   v1["signalk-ws"] = wsURL;
-  JsonObject& serverInfo = json.createNestedObject("server");
+  JsonObject serverInfo = json.createNestedObject("server");
   serverInfo["id"] = "ESP-SigKSen";
-  json.printTo(response);
+  serializeJson(json, response);
   server.send ( 200, "application/json", response);
 }
 
@@ -431,31 +431,32 @@ void EspSigK::sendDelta(String path, bool value) {
 }
 
 void EspSigK::sendDelta() {
-  DynamicJsonBuffer jsonBuffer;
+  const int capacity = JSON_OBJECT_SIZE(JSON_DESERIALIZE_DELTA_SIZE);
+  StaticJsonDocument<capacity> jsonBuffer;
   String deltaText;
 
   //  build delta message
-  JsonObject& delta = jsonBuffer.createObject();
+  JsonObject delta = jsonBuffer.createNestedObject();
 
   //updated array
-  JsonArray& updatesArr = delta.createNestedArray("updates");
+  JsonArray updatesArr = delta.createNestedArray("updates");
   
-  JsonObject& thisUpdate = updatesArr.createNestedObject();
+  JsonObject thisUpdate = updatesArr.createNestedObject();
 
-  JsonObject& source = thisUpdate.createNestedObject("source");
+  JsonObject source = thisUpdate.createNestedObject("source");
   source["label"] = "ESP";
   source["src"] = myHostname;
      
-  JsonArray& values = thisUpdate.createNestedArray("values");
+  JsonArray values = thisUpdate.createNestedArray("values");
   for (uint8_t i = 0; i < idxDeltaValues; i++) {
-    JsonObject& thisValue = values.createNestedObject();
+    JsonObject thisValue = values.createNestedObject();
     thisValue["path"] = deltaPaths[i].c_str();
-    thisValue["value"] = RawJson(deltaValues[i].c_str());
+    thisValue["value"] = serialized(deltaValues[i].c_str());
   }
 
         
   
-  delta.printTo(deltaText);
+  serializeJson(delta, deltaText);
   if (printDeltaSerial) Serial.println(deltaText);
   webSocketServer.broadcastTXT(deltaText);
   if (wsClientConnected) { // client
