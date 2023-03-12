@@ -5,15 +5,14 @@ extern "C" {
   #include "user_interface.h"
 }
 
-#include <ESP8266WiFi.h>          //ESP8266 Core WiFi Library (you most likely already have this in your sketch)
+#include <ESP8266WiFi.h>        // ESP8266 Core WiFi Library (you most likely already have this in your sketch)
 #include <ESP8266mDNS.h>        // Include the mDNS library
 #include <ESP8266SSDP.h>
-#include <ESP8266WebServer.h> //Local WebServer used to serve the configuration portal
+#include <ESP8266WebServer.h>   // Local WebServer used to serve the configuration portal
 
 
-#include <ArduinoJson.h>     //https://github.com/bblanchon/ArduinoJson
-#include <WebSocketsServer.h>
-#include <WebSocketsClient.h>
+#include <ArduinoJson.h>        // https://github.com/bblanchon/ArduinoJson
+#include <ArduinoWebsockets.h>  // https://github.com/gilmaimon/ArduinoWebsockets
 
 #define MAX_DELTA_VALUES 10
 
@@ -74,8 +73,6 @@ class EspSigK
 void htmlSignalKEndpoints();
 void htmlHandleNotFound();
 
-void webSocketClientEvent(WStype_t type, uint8_t * payload, size_t length);
-void webSocketServerEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length);
-
+void webSocketClientMessage(websockets::WebsocketsMessage message);
 
 #endif

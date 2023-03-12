@@ -4,8 +4,7 @@
 
 // Server variables
 ESP8266WebServer server(80);
-WebSocketsServer webSocketServer = WebSocketsServer(81);
-WebSocketsClient webSocketClient;
+websockets::WebsocketsClient webSocketClient;
 
 bool printDeltaSerial;
 bool printDebugSerial;
@@ -74,7 +73,6 @@ EspSigK::EspSigK(String hostname, String ssid, String ssidPass)
   mySSIDPass = ssidPass;
 
 
-  webSocketServer = WebSocketsServer(81);
   wsClientConnected = false;
 
   signalKServerHost = "";
@@ -210,9 +208,8 @@ void EspSigK::handle() {
   //HTTP
   server.handleClient();
   //WS
-  webSocketServer.loop();
-  if (wsClientConnected) {
-    webSocketClient.loop();    
+  if (wsClientConnected && webSocketClient.available()) {
+    webSocketClient.poll();
   }
 }
 
@@ -291,9 +288,7 @@ void htmlSignalKEndpoints() {
 /* ******************************************************************** */
 void EspSigK::setupWebSocket() {
   
-  webSocketServer.begin();
-  webSocketServer.onEvent(webSocketServerEvent);
-  webSocketClient.onEvent(webSocketClientEvent);
+  webSocketClient.onMessage(webSocketClientMessage);
 
   connectWebSocketClient();
 }
@@ -342,49 +337,13 @@ void EspSigK::connectWebSocketClient() {
     url = url + "&token=" + signalKServerToken;
   }
 
-  webSocketClient.begin(host, port, url);
-  wsClientConnected = true;
+  wsClientConnected = webSocketClient.connect(host, port, url);
 }
 
-void webSocketClientEvent(WStype_t type, uint8_t * payload, size_t length) {
- switch(type) {
-    case WStype_DISCONNECTED: {
-      wsClientConnected = false;
-      if (printDebugSerial) Serial.println("SIGK: Websocket Client Disconnected!");
-      break;
-    }
-    case WStype_CONNECTED: {
-      wsClientConnected = true;
-      if (printDebugSerial) Serial.printf("SIGK: Client Connected to url: %s\n", payload);
-      break;
-    }
-    case WStype_TEXT:
-      //Serial.printf("[WSc] get text: %s\n", payload);
-      //receiveDelta(payload);
-      break;
-    case WStype_BIN:
-      //Serial.printf("[WSc] get binary length: %u\n", length);
-      //hexdump(payload, length);
-      break;
-  }
-}
-
-void webSocketServerEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
-    switch(type) {
-        case WStype_DISCONNECTED: {
-            if (printDebugSerial) Serial.printf("SIGK: Websocket Server [%u] Disconnected!\n", num);
-            break;
-        }
-        case WStype_CONNECTED: {
-            IPAddress ip = webSocketServer.remoteIP(num);
-            if (printDebugSerial) Serial.printf("SIGK: Websocket Server [%u] Connected from %d.%d.%d.%d url: %s\n", num, ip[0], ip[1], ip[2], ip[3], payload);
-            break;
-        }
-        case WStype_TEXT:
-            break;
-        case WStype_BIN:
-            break;
-    }
+void webSocketClientMessage(websockets::WebsocketsMessage message) {
+  String payload = message.data();
+  Serial.printf("[WSc] get text: %s\n", payload);
+  // receiveDelta(payload);
 }
 
 
@@ -458,9 +417,8 @@ void EspSigK::sendDelta() {
   
   serializeJson(delta, deltaText);
   if (printDeltaSerial) Serial.println(deltaText);
-  webSocketServer.broadcastTXT(deltaText);
   if (wsClientConnected) { // client
-    webSocketClient.sendTXT(deltaText);
+    webSocketClient.send(deltaText);
   }
  
   //reset delta info
@@ -470,7 +428,3 @@ void EspSigK::sendDelta() {
     deltaValues[i] = "";
   }
 }
-
-
-
-
