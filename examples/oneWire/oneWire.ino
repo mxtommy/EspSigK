@@ -24,7 +24,8 @@ const String hostname  = "Tester";    //Hostname for network discovery
 const String ssid      = "mywifi";     //SSID to connect to
 const String ssidPass  = "superSecret";  // Password for wifi
 
-EspSigK sigK(hostname, ssid, ssidPass); // create the object
+WiFiClient wiFiClient;
+EspSigK sigK(hostname, ssid, ssidPass, &wiFiClient); // create the object
 
 DeviceAddress connectedSensors[10];
 uint8_t numberOfDevices = 0;

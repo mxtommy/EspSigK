@@ -13,8 +13,19 @@ extern "C" {
 
 #include <ArduinoJson.h>        // https://github.com/bblanchon/ArduinoJson
 #include <ArduinoWebsockets.h>  // https://github.com/gilmaimon/ArduinoWebsockets
+#include <UUID.h>               // https://github.com/RobTillaart/UUID
+#include <Preferences.h>
 
 #define MAX_DELTA_VALUES 10
+#define SIGNALKAUTH_STR_LENGTH 64
+
+struct signalKAccessResponse {
+  String state;
+  String href;
+  String accessRequestPermission;
+  String accessRequestToken;
+  int error;
+};
 
 class EspSigK
 {
@@ -27,6 +38,9 @@ class EspSigK
     uint16_t signalKServerPort;
     String signalKServerToken;
 
+    char signalKclientId[SIGNALKAUTH_STR_LENGTH];
+    char signalKrequestHref[SIGNALKAUTH_STR_LENGTH];
+
     String deltaPaths[MAX_DELTA_VALUES];
     String deltaValues[MAX_DELTA_VALUES];
     uint8_t idxDeltaValues;
@@ -34,16 +48,21 @@ class EspSigK
     uint32_t wsClientReconnectInterval;
 
     uint32_t timerReconnect;
+    bool printDebugSerial;
+    bool lastPrintDebugSerialHadNewline;
+
+    WiFiClient * wiFiClient;
     
     
 
   public:
-    EspSigK(String hostname, String ssid, String ssidPass);
+    EspSigK(String hostname, String ssid, String ssidPass, WiFiClient * client);
     void setServerHost(String newServer);
     void setServerPort(uint16_t newPort);
     void setServerToken(String token);
     void setPrintDeltaSerial(bool v);
     void setPrintDebugSerial(bool v);
+    bool isPrintDebugSerial();
 
 
     void begin(void);
@@ -66,6 +85,23 @@ class EspSigK
     void setupWebSocket();
     bool getMDNSService(String &host, uint16_t &port);
     void connectWebSocketClient();
+
+    void printDebugSerialMessage(const char * message, bool newline);
+    void printDebugSerialMessage(String message, bool newline);
+    void printDebugSerialMessage(int message, bool newline);
+    void setupSignalKServerToken();
+    void getServerToken(char * token);
+    void getRequestHref(const char * clientId, char * requestHref);
+    void getRequestToken(const char * requestHref, char * token);
+    signalKAccessResponse sendAccessRequest(const String &urlPath, bool isPost, const String &jsonPayload);
+    void preferencesClear();
+    String preferencesGet(const String &property);
+    void preferencesPut(const String &property, const String &value);
+    String preferencesGetClientId();
+    String preferencesGetRequestHref();
+    void preferencesPutRequestHref(const String &value);
+    String preferencesGetServerToken();
+    void preferencesPutServerToken(const String &value);
 
 };
 
