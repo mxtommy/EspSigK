@@ -1,3 +1,5 @@
+#include <Arduino.h>
+#include <ESP8266WiFi.h>        // ESP8266 Core WiFi Library (you most likely already have this in your sketch)
 
 #include "EspSigK.h"
 
@@ -8,7 +10,8 @@ const String ssid      = "mywifi";     //SSID to connect to
 const String ssidPass  = "superSecret";  // Password for wifi
 
 
-EspSigK sigK(hostname, ssid, ssidPass); // create the object
+WiFiClient wiFiClient;
+EspSigK sigK(hostname, ssid, ssidPass, &wiFiClient); // create the SignalK communication object
 
 void setup() {
   Serial.begin(115200);
@@ -43,6 +46,4 @@ void loop() {
   //if you don't use delays (or the delay function above) call this one every
   //loop in order to handle http/websocket connections etc...
   sigK.handle();
-
-
 }

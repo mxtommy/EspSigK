@@ -1,12 +1,14 @@
-
 #include "EspSigK.h"
 
+#define SERIAL_DEBUG_MESSAGE_PREFIX "SigK: "
+#define JSON_DESERIALIZE_DELTA_SIZE 384
+#define JSON_DESERIALIZE_HTTP_RESPONSE_SIZE 384
+#define PREFERENCES_NAMESPACE "EspSigK"
 
 
 // Server variables
 ESP8266WebServer server(80);
-WebSocketsServer webSocketServer = WebSocketsServer(81);
-WebSocketsClient webSocketClient;
+websockets::WebsocketsClient webSocketClient;
 
 bool printDeltaSerial;
 bool printDebugSerial;
@@ -49,12 +51,30 @@ const char * EspSigKIndexContents = R"foo(
   <pre width="100%" height="50%" id="box">Not Connected yet</pre>
   <div id="last"></div>
   <div id="age"></div>
+
+  <p>
+    <ul>
+      <li><a href="reset_auth">Reset authentication tokens</a></li>
+    </ul>
+  </p>
 </body>
 </html>
 )foo";
 
-
-
+// Response to SignalK authentication reset
+const char * EspSigKAuthResetContent = R"foo(
+<html>
+<head>
+  <title>Authentication Reset</title>
+  <meta charset="utf-8">
+</head>
+<body>
+<h3>Authentication Reset</h3>
+<p>Authentication tokens were removed. The sensor starts the authentication process.</p>
+<a href="/">Go back</a>
+</body>
+</html>
+)foo";
 
 
 
@@ -68,14 +88,13 @@ const char * EspSigKIndexContents = R"foo(
 /* ******************************************************************** */
 /* ******************************************************************** */
 /* ******************************************************************** */
-EspSigK::EspSigK(String hostname, String ssid, String ssidPass)
+EspSigK::EspSigK(String hostname, String ssid, String ssidPass, WiFiClient * client)
 {
   myHostname = hostname;
   mySSID = ssid;
   mySSIDPass = ssidPass;
+  wiFiClient = client;
 
-
-  webSocketServer = WebSocketsServer(81);
   wsClientConnected = false;
 
   signalKServerHost = "";
@@ -84,6 +103,7 @@ EspSigK::EspSigK(String hostname, String ssid, String ssidPass)
 
   printDeltaSerial = false;
   printDebugSerial = false;
+  lastPrintDebugSerialHadNewline = true;
 
   wsClientReconnectInterval = 10000;
   
@@ -111,6 +131,38 @@ void EspSigK::setPrintDeltaSerial(bool v) {
 void EspSigK::setPrintDebugSerial(bool v) {
   printDebugSerial = v;
 }
+bool EspSigK::isPrintDebugSerial() {
+  return printDebugSerial;
+}
+
+void EspSigK::printDebugSerialMessage(const char* message, bool newline) {
+  if (!printDebugSerial) {
+    return;
+  }
+  
+  if (lastPrintDebugSerialHadNewline) Serial.print(SERIAL_DEBUG_MESSAGE_PREFIX);
+  newline ? Serial.println(message) : Serial.print(message);
+  lastPrintDebugSerialHadNewline = newline;
+}
+void EspSigK::printDebugSerialMessage(String message, bool newline) {
+  if (!printDebugSerial) {
+    return;
+  }
+  
+  if (lastPrintDebugSerialHadNewline) Serial.print(SERIAL_DEBUG_MESSAGE_PREFIX);
+  newline ? Serial.println(message) : Serial.print(message);
+  lastPrintDebugSerialHadNewline = newline;
+}
+void EspSigK::printDebugSerialMessage(int message, bool newline) {
+  if (!printDebugSerial) {
+    return;
+  }
+  
+  if (lastPrintDebugSerialHadNewline) Serial.print(SERIAL_DEBUG_MESSAGE_PREFIX);
+  newline ? Serial.println(message) : Serial.print(message);
+  lastPrintDebugSerialHadNewline = newline;
+}
+
 
 /* ******************************************************************** */
 /* ******************************************************************** */
@@ -122,34 +174,27 @@ void EspSigK::setPrintDebugSerial(bool v) {
 
 
 void EspSigK::connectWifi() {
-  if (printDebugSerial) Serial.print("SIGK: Connecting to Wifi");
+  printDebugSerialMessage(F("Connecting to Wifi.."), false);
   WiFi.begin(mySSID.c_str(), mySSIDPass.c_str());
-  while (WiFi.status() != WL_CONNECTED)
-  {
+  while (WiFi.status() != WL_CONNECTED) {
     delay(200);
-    if (printDebugSerial) Serial.print(".");
+    printDebugSerialMessage(F("."), false);
   }
-  if (printDebugSerial) {
-    Serial.println();
-    Serial.print("SIGK: Connected to Wifi!. IP: ");
-    Serial.println(WiFi.localIP());
-  }
-  
+
+  printDebugSerialMessage(F("Connected, IP:"), false);
+  printDebugSerialMessage(WiFi.localIP().toString(), true);
 }
 
 void EspSigK::setupDiscovery() {
   if (!MDNS.begin(myHostname.c_str())) {             // Start the mDNS responder for esp8266.local
-    if (printDebugSerial) Serial.println("SIGK: Error setting up MDNS responder!");
+    printDebugSerialMessage(F("Error setting up MDNS responder!"), true);
   } else {
     MDNS.addService("http", "tcp", 80);
-    if (printDebugSerial) {
-      Serial.print ("SIGK: mDNS responder started at ");
-      Serial.print (myHostname);
-      Serial.println("");
-    }
+    printDebugSerialMessage(F("SIGK: mDNS responder started at "), false);
+    printDebugSerialMessage(myHostname, true);
   }
     
-  if (printDebugSerial) Serial.println("SIGK: Starting SSDP...");
+  printDebugSerialMessage(F("SIGK: Starting SSDP..."), true);
   SSDP.setSchemaURL("description.xml");
   SSDP.setHTTPPort(80);
   SSDP.setName(myHostname);
@@ -173,16 +218,17 @@ void EspSigK::setupDiscovery() {
 /* ******************************************************************** */
 /* ******************************************************************** */
 void EspSigK::begin() {
-  if (printDebugSerial) {
-    Serial.print("SIGK: Starting as host: ");
-    Serial.println(myHostname);
-  }
+  printDebugSerialMessage(F("SIGK: Starting as host: "), false);
+  printDebugSerialMessage(myHostname, true);
 
   /* Explicitly set the ESP8266 to be a WiFi-client, otherwise, it by default,
      would try to act as both a client and an access-point and could cause
      network-issues with your other WiFi-devices on your WiFi-network. */
   WiFi.mode(WIFI_STA);
   connectWifi();
+
+  setupSignalKServerToken();
+
   setupDiscovery();
   setupHTTP();
   setupWebSocket();
@@ -211,9 +257,8 @@ void EspSigK::handle() {
   //HTTP
   server.handleClient();
   //WS
-  webSocketServer.loop();
-  if (wsClientConnected) {
-    webSocketClient.loop();    
+  if (wsClientConnected && webSocketClient.available()) {
+    webSocketClient.poll();
   }
 }
 
@@ -236,7 +281,7 @@ void EspSigK::safeDelay(unsigned long ms)
 /* ******************************************************************** */
 /* ******************************************************************** */
 void EspSigK::setupHTTP() {
-  if (printDebugSerial) Serial.println("SIGK: Starting HTTP Server");
+  printDebugSerialMessage(F("SIGK: Starting HTTP Server"), true);
   server.onNotFound(htmlHandleNotFound);
 
   server.on("/description.xml", HTTP_GET, [](){ SSDP.schema(server.client()); });
@@ -249,6 +294,13 @@ void EspSigK::setupHTTP() {
   server.on("/index.html",[]() {
       server.send ( 200, "text/html", EspSigKIndexContents );
     });
+  server.on("/reset_auth",[&]() {
+      server.send ( 200, "text/html", EspSigKAuthResetContent );
+      signalKServerToken = "";
+      preferencesClear();
+      setupSignalKServerToken();
+    });
+
   server.begin();
 }
 
@@ -257,13 +309,14 @@ void htmlHandleNotFound(){
 }
 
 void htmlSignalKEndpoints() {
-  IPAddress ip;  
-  DynamicJsonBuffer jsonBuffer;
+  IPAddress ip;
+  const int capacity = JSON_OBJECT_SIZE(JSON_DESERIALIZE_DELTA_SIZE);
+  StaticJsonDocument<capacity> jsonBuffer;
   char response[2048];
   String wsURL;
   ip = WiFi.localIP();
  
-  JsonObject& json = jsonBuffer.createObject();
+  JsonObject json = jsonBuffer.createNestedObject();
   String ipString = String(ip[0]);
   for (uint8_t octet = 1; octet < 4; ++octet) {
     ipString += '.' + String(ip[octet]);
@@ -272,13 +325,13 @@ void htmlSignalKEndpoints() {
 
   wsURL = "ws://" + ipString + ":81/";
 
-  JsonObject& endpoints = json.createNestedObject("endpoints");
-  JsonObject& v1 = endpoints.createNestedObject("v1");
+  JsonObject endpoints = json.createNestedObject("endpoints");
+  JsonObject v1 = endpoints.createNestedObject("v1");
   v1["version"] = "1.alpha1";
   v1["signalk-ws"] = wsURL;
-  JsonObject& serverInfo = json.createNestedObject("server");
+  JsonObject serverInfo = json.createNestedObject("server");
   serverInfo["id"] = "ESP-SigKSen";
-  json.printTo(response);
+  serializeJson(json, response);
   server.send ( 200, "application/json", response);
 }
 
@@ -291,16 +344,14 @@ void htmlSignalKEndpoints() {
 /* ******************************************************************** */
 void EspSigK::setupWebSocket() {
   
-  webSocketServer.begin();
-  webSocketServer.onEvent(webSocketServerEvent);
-  webSocketClient.onEvent(webSocketClientEvent);
+  webSocketClient.onMessage(webSocketClientMessage);
 
   connectWebSocketClient();
 }
 
 bool EspSigK::getMDNSService(String &host, uint16_t &port) {
   // get IP address using an mDNS query
-  if (printDebugSerial) Serial.println("SIGK: Searching for server via mDNS");
+  printDebugSerialMessage(F("Searching for server via mDNS"), true);
   int n = MDNS.queryService("signalk-ws", "tcp");
   if (n==0) {
     // no service found
@@ -308,10 +359,10 @@ bool EspSigK::getMDNSService(String &host, uint16_t &port) {
   } else {
     host = MDNS.IP(0).toString();
     port = MDNS.port(0);
-    if (printDebugSerial) {
-      Serial.print("SIGK: Found SignalK Server via mDNS at: ");
-      Serial.print(host); Serial.print(":"); Serial.println(port);
-    }
+    printDebugSerialMessage(F("Found SignalK Server via mDNS at: "), false);
+    printDebugSerialMessage(host, false);
+    printDebugSerialMessage(F(":"), false);
+    printDebugSerialMessage(port, false);
     return true;
   }
 }
@@ -333,58 +384,22 @@ void EspSigK::connectWebSocketClient() {
 
   if ( (host.length() > 0) && 
        (port > 0) ) {
-    if (printDebugSerial) Serial.println("SIGK: Websocket client attempting to connect!");
+    printDebugSerialMessage(F("Websocket client attempting to connect!"), true);
   } else {
-    if (printDebugSerial) Serial.println("SIGK: No server for websocket client");
+    printDebugSerialMessage(F("No server for websocket client"), true);
     return;
   }
   if (signalKServerToken != "") {
     url = url + "&token=" + signalKServerToken;
   }
 
-  webSocketClient.begin(host, port, url);
-  wsClientConnected = true;
+  wsClientConnected = webSocketClient.connect(host, port, url);
 }
 
-void webSocketClientEvent(WStype_t type, uint8_t * payload, size_t length) {
- switch(type) {
-    case WStype_DISCONNECTED: {
-      wsClientConnected = false;
-      if (printDebugSerial) Serial.println("SIGK: Websocket Client Disconnected!");
-      break;
-    }
-    case WStype_CONNECTED: {
-      wsClientConnected = true;
-      if (printDebugSerial) Serial.printf("SIGK: Client Connected to url: %s\n", payload);
-      break;
-    }
-    case WStype_TEXT:
-      //Serial.printf("[WSc] get text: %s\n", payload);
-      //receiveDelta(payload);
-      break;
-    case WStype_BIN:
-      //Serial.printf("[WSc] get binary length: %u\n", length);
-      //hexdump(payload, length);
-      break;
-  }
-}
-
-void webSocketServerEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
-    switch(type) {
-        case WStype_DISCONNECTED: {
-            if (printDebugSerial) Serial.printf("SIGK: Websocket Server [%u] Disconnected!\n", num);
-            break;
-        }
-        case WStype_CONNECTED: {
-            IPAddress ip = webSocketServer.remoteIP(num);
-            if (printDebugSerial) Serial.printf("SIGK: Websocket Server [%u] Connected from %d.%d.%d.%d url: %s\n", num, ip[0], ip[1], ip[2], ip[3], payload);
-            break;
-        }
-        case WStype_TEXT:
-            break;
-        case WStype_BIN:
-            break;
-    }
+void webSocketClientMessage(websockets::WebsocketsMessage message) {
+  String payload = message.data();
+  Serial.printf("[WSc] get text: %s\n", payload);
+  // receiveDelta(payload);
 }
 
 
@@ -396,6 +411,180 @@ void webSocketServerEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t 
 /* ******************************************************************** */
 /* ******************************************************************** */
 /* ******************************************************************** */
+
+void EspSigK::setupSignalKServerToken() {
+  if (signalKServerToken == "") {
+    char serverToken[256] = "";
+    getServerToken(serverToken);
+    setServerToken(String(serverToken));
+  }
+}
+
+void EspSigK::getServerToken(char * token) {
+  strcpy(signalKclientId, preferencesGetClientId().c_str());
+  printDebugSerialMessage("Client ID: ", false);
+  printDebugSerialMessage(signalKclientId, true);
+
+  getRequestHref(signalKclientId, signalKrequestHref);
+  getRequestToken(signalKrequestHref, token);
+
+  printDebugSerialMessage("getRequestToken return token: ", false);
+  printDebugSerialMessage(token, true);
+}
+
+void EspSigK::getRequestHref(const char * clientId, char * requestHref) {
+  strcpy(requestHref, preferencesGetRequestHref().c_str());
+  if (strcmp(requestHref, "") != 0) {
+    printDebugSerialMessage(F("requestHref was found from settings"), true);
+    return;
+  }
+
+  String requestJson = "{\"clientId\":\"" + String(clientId) + "\",\"description\":\"" + myHostname + "\"}";
+  String path = String(F("/signalk/v1/access/requests"));
+
+  signalKAccessResponse accessResponse;
+
+  printDebugSerialMessage(F("Getting access request href..."), false);
+  const char * newRequestHref;
+  while (strcmp(requestHref, "") == 0) {
+    accessResponse = sendAccessRequest(path, true, requestJson);
+    printDebugSerialMessage(accessResponse.href, true);
+    newRequestHref = accessResponse.href.c_str();
+    strcpy(requestHref, newRequestHref);
+    printDebugSerialMessage(".", false);
+    delay(1000);
+  }
+  printDebugSerialMessage(requestHref, true);
+
+  preferencesPutRequestHref(requestHref);
+}
+
+void EspSigK::getRequestToken(const char * requestHref, char * token) {
+  String tokenStr = preferencesGetServerToken();
+  if (tokenStr != "") {
+    strcpy(token, tokenStr.c_str());
+    printDebugSerialMessage(F("serverToken was found from settings"), true);
+    return;
+  }
+
+  signalKAccessResponse accessResponse;
+  String jsonPayload = String("");
+
+  printDebugSerialMessage(F("Getting request token..."), false);
+
+  const char * newServerToken;
+  while (strcmp(token, "") == 0) {
+    accessResponse = sendAccessRequest(requestHref, false, jsonPayload);
+    printDebugSerialMessage("[" + accessResponse.state + "] ", true);
+    newServerToken = accessResponse.accessRequestToken.c_str();
+    strcpy(token, newServerToken);
+    delay(1000);
+  }
+
+  printDebugSerialMessage(F("Got token: "), false);
+  printDebugSerialMessage(token, true);
+
+  preferencesPutServerToken(token);
+}
+
+signalKAccessResponse EspSigK::sendAccessRequest(const String &urlPath, bool isPost, const String &jsonPayload) {
+  signalKAccessResponse response;
+  response.error = 0;
+
+  printDebugSerialMessage(F("sendAccessRequest called, now connecting to "), false);
+  printDebugSerialMessage(signalKServerHost, false);
+  printDebugSerialMessage(F(":"), false);
+  printDebugSerialMessage(signalKServerPort, false);
+  printDebugSerialMessage(urlPath, true);
+
+  printDebugSerialMessage(F("Wifi status: "), false);
+  printDebugSerialMessage(WiFi.status(), true);
+
+  if (! wiFiClient->connect(signalKServerHost, signalKServerPort)) {
+    printDebugSerialMessage(F("sendAccessRequest could not connect to server"), true);
+    response.error = 1;
+    return response;
+  }
+
+  while (!wiFiClient->connected()) {
+    printDebugSerialMessage(F("Waiting while connected to "), false);
+    printDebugSerialMessage(urlPath, true);
+    delay(50);
+  }
+ 
+  if (isPost) {
+    printDebugSerialMessage("POST: ", false);
+    wiFiClient->println("POST " + urlPath + " HTTP/1.1");
+    printDebugSerialMessage(urlPath, true);
+  }
+  else {
+    printDebugSerialMessage("GET: ", false);
+    wiFiClient->println("GET " + urlPath + " HTTP/1.1");
+    printDebugSerialMessage(urlPath, true);
+  }
+  wiFiClient->println("Host: " + myHostname);
+  if (jsonPayload != "") {
+    wiFiClient->println(F("Content-type: application/json"));
+    wiFiClient->println("Content-length: " + String(jsonPayload.length()));
+    wiFiClient->println(); // end HTTP header
+    wiFiClient->println(jsonPayload);
+    printDebugSerialMessage(F("Payload: "), false);
+    printDebugSerialMessage(jsonPayload, true);
+  }
+  else {
+    printDebugSerialMessage("No payload", true);
+  }
+
+  if (wiFiClient->println() == 0) {
+    wiFiClient->stop();
+    printDebugSerialMessage(F("Error: Could not write to server"), true);
+    response.error = 2;
+    return response;
+  }
+
+  // Read HTTP status
+  char httpStatus[32] = {0};
+  wiFiClient->readBytesUntil('\r', httpStatus, sizeof(httpStatus));
+
+  // Skip HTTP headers
+  char endOfHeaders[] = "\r\n\r\n";
+  if (!wiFiClient->find(endOfHeaders)) {
+    printDebugSerialMessage(F("Error: Invalid response"), true);
+    wiFiClient->stop();
+    response.error = 3;
+    return response;
+  }
+
+  const int capacity = JSON_OBJECT_SIZE(JSON_DESERIALIZE_HTTP_RESPONSE_SIZE);
+  DynamicJsonDocument payload(capacity);
+  // const int capacityAccessRequest = JSON_OBJECT_SIZE(JSON_DESERIALIZE_HTTP_RESPONSE_SIZE);
+  // StaticJsonDocument<capacityAccessRequest> payloadAccessRequest;
+
+  DeserializationError error = deserializeJson(payload, *wiFiClient);
+  if (error) {
+    printDebugSerialMessage(F("deserializeJson() failed: "), false);
+    printDebugSerialMessage(error.f_str(), true);
+    wiFiClient->stop();
+    response.error = 4;
+    return response;
+  }
+
+  response.state = String((const char*)payload["state"]);
+  response.href = String((const char*)payload["href"]);
+  response.accessRequestPermission = String((const char*)payload["accessRequest"]["permission"]);
+  response.accessRequestToken = String((const char*)payload["accessRequest"]["token"]);
+
+  printDebugSerialMessage("state: ", false);
+  printDebugSerialMessage(response.state, true);
+  printDebugSerialMessage("href: ", false);
+  printDebugSerialMessage(response.href, true);
+  printDebugSerialMessage("accessRequstPermission: ", false);
+  printDebugSerialMessage(response.accessRequestPermission, true);
+  printDebugSerialMessage("accessRequestToken: ", false);
+  printDebugSerialMessage(response.accessRequestToken, true);
+
+  return response;
+}
 
 void EspSigK::addDeltaValue(String path, int value) {
   String v = String(value);
@@ -431,35 +620,35 @@ void EspSigK::sendDelta(String path, bool value) {
 }
 
 void EspSigK::sendDelta() {
-  DynamicJsonBuffer jsonBuffer;
+  const int capacity = JSON_OBJECT_SIZE(JSON_DESERIALIZE_DELTA_SIZE);
+  StaticJsonDocument<capacity> jsonBuffer;
   String deltaText;
 
   //  build delta message
-  JsonObject& delta = jsonBuffer.createObject();
+  JsonObject delta = jsonBuffer.createNestedObject();
 
   //updated array
-  JsonArray& updatesArr = delta.createNestedArray("updates");
+  JsonArray updatesArr = delta.createNestedArray("updates");
   
-  JsonObject& thisUpdate = updatesArr.createNestedObject();
+  JsonObject thisUpdate = updatesArr.createNestedObject();
 
-  JsonObject& source = thisUpdate.createNestedObject("source");
+  JsonObject source = thisUpdate.createNestedObject("source");
   source["label"] = "ESP";
   source["src"] = myHostname;
      
-  JsonArray& values = thisUpdate.createNestedArray("values");
+  JsonArray values = thisUpdate.createNestedArray("values");
   for (uint8_t i = 0; i < idxDeltaValues; i++) {
-    JsonObject& thisValue = values.createNestedObject();
+    JsonObject thisValue = values.createNestedObject();
     thisValue["path"] = deltaPaths[i].c_str();
-    thisValue["value"] = RawJson(deltaValues[i].c_str());
+    thisValue["value"] = serialized(deltaValues[i].c_str());
   }
 
         
   
-  delta.printTo(deltaText);
+  serializeJson(delta, deltaText);
   if (printDeltaSerial) Serial.println(deltaText);
-  webSocketServer.broadcastTXT(deltaText);
   if (wsClientConnected) { // client
-    webSocketClient.sendTXT(deltaText);
+    webSocketClient.send(deltaText);
   }
  
   //reset delta info
@@ -470,6 +659,79 @@ void EspSigK::sendDelta() {
   }
 }
 
+void EspSigK::preferencesClear() {
+  Preferences preferences;
 
+  printDebugSerialMessage(F("preferencesClear"), true);
 
+  preferences.begin(PREFERENCES_NAMESPACE, false);
+  // ESP8266 failed to delete preferences using preferences.clear() so deleting preferences one by one
+  preferences.remove("clientId");
+  preferences.remove("requestHref");
+  preferences.remove("serverToken");
+  preferences.end();
+}
 
+String EspSigK::preferencesGet(const String &property) {
+  Preferences preferences;
+
+  preferences.begin(PREFERENCES_NAMESPACE, false);
+
+  printDebugSerialMessage(F("preferencesGet, property: "), false);
+  printDebugSerialMessage(property, false);
+
+  String value = preferences.getString(property.c_str(), "");
+  preferences.end();
+
+  printDebugSerialMessage(F(", "), false);
+  printDebugSerialMessage(value, true);
+
+  return value;
+}
+
+void EspSigK::preferencesPut(const String &property, const String &value) {
+  Preferences preferences;
+
+  preferences.begin(PREFERENCES_NAMESPACE, false);
+  preferences.putString(property.c_str(), value);
+  preferences.end();
+
+  printDebugSerialMessage(F("preferencesPut, property: "), false);
+  printDebugSerialMessage(property, false);
+  printDebugSerialMessage(F(", value: "), false);
+  printDebugSerialMessage(value, true);
+}
+
+String EspSigK::preferencesGetClientId() {
+  UUID uuid;
+
+  String clientIdPreferences = preferencesGet(F("clientId"));
+
+  if (clientIdPreferences == "") {
+    uuid.setRandomMode();
+    uuid.generate();
+    String newClientId = String(uuid.toCharArray());
+    printDebugSerialMessage("New clientId: ", false);
+    printDebugSerialMessage(newClientId, true);
+    preferencesPut(F("clientId"), newClientId);
+    return newClientId;
+  }
+
+  return clientIdPreferences;
+}
+
+String EspSigK::preferencesGetRequestHref() {
+  return preferencesGet(F("requestHref"));
+}
+
+void EspSigK::preferencesPutRequestHref(const String &value) {
+  preferencesPut(F("requestHref"), value);
+}
+
+String EspSigK::preferencesGetServerToken() {
+  return preferencesGet(F("serverToken"));
+}
+
+void EspSigK::preferencesPutServerToken(const String &value) {
+  preferencesPut(F("serverToken"), value);
+}
