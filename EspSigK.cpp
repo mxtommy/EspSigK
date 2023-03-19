@@ -182,22 +182,19 @@ void EspSigK::connectWifi() {
   }
 
   printDebugSerialMessage(F("Connected, IP:"), false);
-  printDebugSerialMessage(WiFi.localIP(), true);
+  printDebugSerialMessage(WiFi.localIP().toString(), true);
 }
 
 void EspSigK::setupDiscovery() {
   if (!MDNS.begin(myHostname.c_str())) {             // Start the mDNS responder for esp8266.local
-    if (printDebugSerial) Serial.println("SIGK: Error setting up MDNS responder!");
+    printDebugSerialMessage(F("Error setting up MDNS responder!"), true);
   } else {
     MDNS.addService("http", "tcp", 80);
-    if (printDebugSerial) {
-      Serial.print ("SIGK: mDNS responder started at ");
-      Serial.print (myHostname);
-      Serial.println("");
-    }
+    printDebugSerialMessage(F("SIGK: mDNS responder started at "), false);
+    printDebugSerialMessage(myHostname, true);
   }
     
-  if (printDebugSerial) Serial.println("SIGK: Starting SSDP...");
+  printDebugSerialMessage(F("SIGK: Starting SSDP..."), true);
   SSDP.setSchemaURL("description.xml");
   SSDP.setHTTPPort(80);
   SSDP.setName(myHostname);
@@ -221,10 +218,8 @@ void EspSigK::setupDiscovery() {
 /* ******************************************************************** */
 /* ******************************************************************** */
 void EspSigK::begin() {
-  if (printDebugSerial) {
-    Serial.print("SIGK: Starting as host: ");
-    Serial.println(myHostname);
-  }
+  printDebugSerialMessage(F("SIGK: Starting as host: "), false);
+  printDebugSerialMessage(myHostname, true);
 
   /* Explicitly set the ESP8266 to be a WiFi-client, otherwise, it by default,
      would try to act as both a client and an access-point and could cause
@@ -286,7 +281,7 @@ void EspSigK::safeDelay(unsigned long ms)
 /* ******************************************************************** */
 /* ******************************************************************** */
 void EspSigK::setupHTTP() {
-  if (printDebugSerial) Serial.println("SIGK: Starting HTTP Server");
+  printDebugSerialMessage(F("SIGK: Starting HTTP Server"), true);
   server.onNotFound(htmlHandleNotFound);
 
   server.on("/description.xml", HTTP_GET, [](){ SSDP.schema(server.client()); });
@@ -356,7 +351,7 @@ void EspSigK::setupWebSocket() {
 
 bool EspSigK::getMDNSService(String &host, uint16_t &port) {
   // get IP address using an mDNS query
-  if (printDebugSerial) Serial.println("SIGK: Searching for server via mDNS");
+  printDebugSerialMessage(F("Searching for server via mDNS"), true);
   int n = MDNS.queryService("signalk-ws", "tcp");
   if (n==0) {
     // no service found
@@ -364,10 +359,10 @@ bool EspSigK::getMDNSService(String &host, uint16_t &port) {
   } else {
     host = MDNS.IP(0).toString();
     port = MDNS.port(0);
-    if (printDebugSerial) {
-      Serial.print("SIGK: Found SignalK Server via mDNS at: ");
-      Serial.print(host); Serial.print(":"); Serial.println(port);
-    }
+    printDebugSerialMessage(F("Found SignalK Server via mDNS at: "), false);
+    printDebugSerialMessage(host, false);
+    printDebugSerialMessage(F(":"), false);
+    printDebugSerialMessage(port, false);
     return true;
   }
 }
@@ -389,9 +384,9 @@ void EspSigK::connectWebSocketClient() {
 
   if ( (host.length() > 0) && 
        (port > 0) ) {
-    if (printDebugSerial) Serial.println("SIGK: Websocket client attempting to connect!");
+    printDebugSerialMessage(F("Websocket client attempting to connect!"), true);
   } else {
-    if (printDebugSerial) Serial.println("SIGK: No server for websocket client");
+    printDebugSerialMessage(F("No server for websocket client"), true);
     return;
   }
   if (signalKServerToken != "") {
@@ -418,9 +413,6 @@ void webSocketClientMessage(websockets::WebsocketsMessage message) {
 /* ******************************************************************** */
 
 void EspSigK::setupSignalKServerToken() {
-  // FIXME: Remove this
-  //preferencesClear();
-
   if (signalKServerToken == "") {
     char serverToken[256] = "";
     getServerToken(serverToken);
